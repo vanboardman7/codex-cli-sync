@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-cli-sync"
+version = "0.1.0"
+description = "Git-based sync for ~/.codex across machines"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Van Boardman", email = "vanjboardman@gmail.com" }]
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pylint>=3.3",
+  "pytest>=8",
+  "pytest-timeout>=2.3",
+]
+
+[project.scripts]
+codex-sync = "codex_cli_sync.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_cli_sync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+timeout = 60
