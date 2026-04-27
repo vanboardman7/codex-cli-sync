@@ -47,6 +47,8 @@ def test_push_omits_local_runtime_files_but_syncs_sessions(sync_repos) -> None:
     session_file.write_text('{"type":"message"}\n')
     (sync_repos.first / "history.jsonl").write_text('{"session":"latest"}\n')
     (sync_repos.first / "logs_2.sqlite").write_text("new local cache\n")
+    git(sync_repos.first, "add", "logs_2.sqlite")
+    (sync_repos.first / "logs_2.sqlite").write_text("newer local cache\n")
     (sync_repos.first / "logs_2.sqlite-wal").write_text("wal\n")
     content_dir = sync_repos.first / "context-mode" / "content"
     content_dir.mkdir(parents=True)

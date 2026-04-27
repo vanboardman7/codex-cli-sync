@@ -103,6 +103,7 @@ def untrack_files(cwd: Path, paths: Iterable[str]) -> None:
             cwd,
             "rm",
             "--cached",
+            "-f",
             "--ignore-unmatch",
             "--",
             *files[start : start + 100],
