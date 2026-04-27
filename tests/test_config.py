@@ -20,6 +20,7 @@ def test_defaults_exclude_auth_transient_and_local_runtime_files() -> None:
     .sync.lock
     .sync.log
     log/
+    models_cache.json
     logs_*.sqlite*
     state_*.sqlite*
     context-mode/content/

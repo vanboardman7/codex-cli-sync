@@ -21,6 +21,7 @@ DEFAULT_EXCLUDES = [
     "auth.json",
     "auth.json.*",
     "log/",
+    "models_cache.json",
     "logs_*.sqlite*",
     "state_*.sqlite*",
     "context-mode/content/",
