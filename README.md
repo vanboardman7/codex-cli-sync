@@ -92,7 +92,9 @@ Codex currently loads lifecycle hooks from the global `~/.codex/hooks.json`, not
 
 `codex-sync pull` compares dependencies before and after a successful remote update. If startup pulls add, remove, or change external dependencies, the hook prints a concise alert and writes details to local `.sync-state.json`.
 
-Install commands are never run from startup hooks. Use `codex-sync deps status` to see what is missing on the current machine, then `codex-sync deps install --execute` to run supported installs. Local `.venv` or absolute-path binaries are checked by exact path and reported when missing, but they are not installed automatically.
+`codex-sync deps status` and `codex-sync deps install` use the synced `.sync-dependencies.json` when it exists, falling back to a local scan only when no manifest has been pulled yet. This lets a new machine install the requirements captured by the cloud copy instead of losing recipe details by re-scanning incomplete local config.
+
+Install commands are never run from startup hooks. Use `codex-sync deps status` to see what is missing on the current machine, then `codex-sync deps install --execute` to run supported installs. Install recipes can contain multiple commands, including supplemental `npx -p` packages and known local MCP setup steps such as the Crawl4AI virtualenv and Playwright browser install. System packages may still require the platform package manager or `sudo` through the explicit install command.
 
 ## Release Sync
 

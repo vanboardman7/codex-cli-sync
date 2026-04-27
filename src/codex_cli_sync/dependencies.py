@@ -34,6 +34,7 @@ class DependencyRecord:  # pylint: disable=too-many-instance-attributes
     package: str = ""
     scope: str = "global"
     install_command: list[str] = field(default_factory=list)
+    install_commands: list[list[str]] = field(default_factory=list)
     reference: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -53,12 +54,28 @@ class DependencyRecord:  # pylint: disable=too-many-instance-attributes
             "install_command": self.install_command,
             "reference": self.reference,
         }
+        legacy_commands = [self.install_command] if self.install_command else []
+        if self.install_commands and self.install_commands != legacy_commands:
+            optional["install_commands"] = self.install_commands
         data.update({key: value for key, value in optional.items() if value})
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DependencyRecord":
         """Build a dependency record from manifest JSON data."""
+        install_command = [
+            str(item) for item in data.get("install_command", []) if isinstance(item, str)
+        ]
+        raw_install_commands = data.get("install_commands", [])
+        install_commands = [
+            [str(item) for item in command]
+            for command in raw_install_commands
+            if isinstance(command, list) and all(isinstance(item, str) for item in command)
+        ]
+        if install_command and install_command not in install_commands:
+            install_commands.insert(0, install_command)
+        if not install_command and install_commands:
+            install_command = list(install_commands[0])
         return cls(
             id=str(data["id"]),
             kind=str(data["kind"]),
@@ -69,7 +86,8 @@ class DependencyRecord:  # pylint: disable=too-many-instance-attributes
             package_manager=str(data.get("package_manager", "")),
             package=str(data.get("package", "")),
             scope=str(data.get("scope", "global")),
-            install_command=list(data.get("install_command", [])),
+            install_command=install_command,
+            install_commands=install_commands,
             reference=str(data.get("reference", "")),
         )
 
@@ -247,38 +265,36 @@ def install_dependencies(
     """Plan or run supported dependency installation commands."""
     results: list[InstallResult] = []
     for record in manifest.dependencies:
-        if not record.install_command:
-            continue
-        command = list(record.install_command)
-        if not execute:
-            results.append(InstallResult(record, command, "planned"))
-            continue
-        try:
-            result = subprocess.run(
-                command,
-                cwd=codex_dir,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=_INSTALL_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError as exc:
-            results.append(InstallResult(record, command, "error", str(exc)))
-            continue
-        except subprocess.TimeoutExpired:
-            results.append(
-                InstallResult(
-                    record,
+        for command in _record_install_commands(record):
+            if not execute:
+                results.append(InstallResult(record, command, "planned"))
+                continue
+            try:
+                result = subprocess.run(
                     command,
-                    "error",
-                    f"timed out after {_INSTALL_TIMEOUT_SECONDS}s",
+                    cwd=codex_dir,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=_INSTALL_TIMEOUT_SECONDS,
                 )
-            )
-            continue
-        detail = (result.stderr or result.stdout).strip()
-        status = "installed" if result.returncode == 0 else "error"
-        results.append(InstallResult(record, command, status, detail))
+            except FileNotFoundError as exc:
+                results.append(InstallResult(record, command, "error", str(exc)))
+                continue
+            except subprocess.TimeoutExpired:
+                results.append(
+                    InstallResult(
+                        record,
+                        command,
+                        "error",
+                        f"timed out after {_INSTALL_TIMEOUT_SECONDS}s",
+                    )
+                )
+                continue
+            detail = (result.stderr or result.stdout).strip()
+            status = "installed" if result.returncode == 0 else "error"
+            results.append(InstallResult(record, command, status, detail))
     return results
 
 
@@ -426,7 +442,12 @@ def _record_from_tokens(
     clean_tokens = _strip_env_prefix(tokens)
     executable = clean_tokens[0] if clean_tokens else tokens[0]
     args = clean_tokens[1:]
-    package_manager, package, install_command = _package_details(executable, args)
+    package_manager, package, install_commands = _package_details(executable, args)
+    local_package, local_install_commands = _local_setup_details(executable, args)
+    if local_install_commands:
+        package_manager = package_manager or "local"
+        package = package or local_package
+        install_commands.extend(local_install_commands)
     scope = "local" if _is_path_executable(executable) else "global"
     return DependencyRecord(
         id=identity,
@@ -438,26 +459,31 @@ def _record_from_tokens(
         package_manager=package_manager,
         package=package,
         scope=scope,
-        install_command=install_command,
+        install_command=list(install_commands[0]) if install_commands else [],
+        install_commands=install_commands,
     )
 
 
 def _package_details(
     executable: str, args: list[str]
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, list[list[str]]]:
     base = Path(executable).name
     if base == "uvx":
         package = _uvx_package(args)
-        return "uvx", package, ["uv", "tool", "install", package] if package else []
+        command = ["uv", "tool", "install", package] if package else []
+        return "uvx", package, [command] if command else []
     if base == "npx":
-        package = _npx_package(args)
-        return "npx", package, ["npm", "install", "-g", package] if package else []
+        packages = _npx_packages(args)
+        command = ["npm", "install", "-g", *packages] if packages else []
+        return "npx", packages[0] if packages else "", [command] if command else []
     if base == "bunx":
         package = _first_non_option(args)
-        return "bunx", package, ["bun", "add", "--global", package] if package else []
+        command = ["bun", "add", "--global", package] if package else []
+        return "bunx", package, [command] if command else []
     if base == "pipx":
         package = _pipx_package(args)
-        return "pipx", package, ["pipx", "install", package] if package else []
+        command = ["pipx", "install", package] if package else []
+        return "pipx", package, [command] if command else []
     return "", "", []
 
 
@@ -471,12 +497,23 @@ def _uvx_package(args: list[str]) -> str:
 
 
 def _npx_package(args: list[str]) -> str:
+    packages = _npx_packages(args)
+    return packages[0] if packages else ""
+
+
+def _npx_packages(args: list[str]) -> list[str]:
+    packages: list[str] = []
     for index, arg in enumerate(args):
         if arg in {"--package", "-p"} and index + 1 < len(args):
-            return args[index + 1]
-        if arg.startswith("--package="):
-            return arg.split("=", 1)[1]
-    return _first_non_option(args, skip_options_with_values={"--cache", "--userconfig"})
+            packages.append(args[index + 1])
+        elif arg.startswith("--package="):
+            packages.append(arg.split("=", 1)[1])
+    if packages:
+        return _dedupe_strings(packages)
+    package = _first_non_option(
+        args, skip_options_with_values={"--cache", "--userconfig"}
+    )
+    return [package] if package else []
 
 
 def _pipx_package(args: list[str]) -> str:
@@ -517,6 +554,41 @@ def _first_non_option(
             continue
         return arg
     return ""
+
+
+def _record_install_commands(record: DependencyRecord) -> list[list[str]]:
+    """Return install commands from current and legacy manifest fields."""
+    commands = [list(command) for command in record.install_commands if command]
+    if record.install_command and record.install_command not in commands:
+        commands.insert(0, list(record.install_command))
+    return commands
+
+
+def _local_setup_details(
+    executable: str, args: list[str]
+) -> tuple[str, list[list[str]]]:
+    """Return setup commands for local MCP servers with known bootstrap needs."""
+    if not _is_crawl4ai_local_server(executable, args):
+        return "", []
+    python_path = Path(executable).expanduser()
+    if python_path.parent.name != "bin":
+        return "", []
+    venv_dir = python_path.parent.parent
+    playwright = python_path.parent / "playwright"
+    return "crawl4ai", [
+        ["uv", "venv", venv_dir.as_posix(), "--python", "3.13"],
+        ["uv", "pip", "install", "--python", python_path.as_posix(), "crawl4ai"],
+        [playwright.as_posix(), "install", "chromium"],
+        [playwright.as_posix(), "install-deps", "chromium"],
+    ]
+
+
+def _is_crawl4ai_local_server(executable: str, args: list[str]) -> bool:
+    """Return whether a command matches the bundled Crawl4AI MCP wrapper."""
+    executable_name = Path(executable).name
+    if not executable_name.startswith("python"):
+        return False
+    return any(Path(arg).name == "crawl4ai-mcp-server.py" for arg in args)
 
 
 def _check_record(record: DependencyRecord, codex_dir: Path) -> DependencyStatus:
@@ -719,6 +791,15 @@ def _walk_external_references(
         for index, item in enumerate(value):
             references.extend(_walk_external_references(item, (*path, str(index))))
     return references
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    """Return strings in first-seen order without duplicates."""
+    deduped: list[str] = []
+    for value in values:
+        if value and value not in deduped:
+            deduped.append(value)
+    return deduped
 
 
 def _looks_external(value: str) -> bool:

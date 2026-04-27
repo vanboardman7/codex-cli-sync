@@ -9,9 +9,11 @@ from pathlib import Path
 from codex_cli_sync import __version__
 from codex_cli_sync.config import Config, DEFAULT_CODEX_DIR
 from codex_cli_sync.dependencies import (
+    DependencyManifest,
     check_dependencies,
     collect_manifest,
     install_dependencies,
+    load_manifest,
     refresh_manifest,
 )
 from codex_cli_sync.errors import CodexSyncError, ConfigError
@@ -198,7 +200,7 @@ def _cmd_deps_refresh(args: argparse.Namespace) -> int:
 
 def _cmd_deps_status(args: argparse.Namespace) -> int:
     """Print dependency availability for the current machine."""
-    manifest = collect_manifest(args.codex_dir)
+    manifest = _dependency_manifest_for_local_actions(args.codex_dir)
     statuses = check_dependencies(manifest, args.codex_dir)
     if not statuses:
         print("no external dependencies tracked")
@@ -214,7 +216,7 @@ def _cmd_deps_status(args: argparse.Namespace) -> int:
 
 def _cmd_deps_install(args: argparse.Namespace) -> int:
     """Plan or run supported dependency install commands."""
-    manifest = collect_manifest(args.codex_dir)
+    manifest = _dependency_manifest_for_local_actions(args.codex_dir)
     results = install_dependencies(manifest, args.codex_dir, execute=args.execute)
     if not results:
         print("no installable external dependencies")
@@ -228,6 +230,12 @@ def _cmd_deps_install(args: argparse.Namespace) -> int:
         if result.detail:
             print(result.detail)
     return 1 if failed else 0
+
+
+def _dependency_manifest_for_local_actions(codex_dir: Path) -> DependencyManifest:
+    """Return the synced manifest when available, falling back to a local scan."""
+    manifest = load_manifest(codex_dir)
+    return manifest if manifest.dependencies else collect_manifest(codex_dir)
 
 
 def _cmd_hooks_install(args: argparse.Namespace) -> int:

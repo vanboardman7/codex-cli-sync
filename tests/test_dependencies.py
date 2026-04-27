@@ -145,6 +145,59 @@ def test_diff_manifests_reports_added_removed_and_changed() -> None:
     assert [record.id for record in changes.changed] == ["hook:SessionStart:tool"]
 
 
+def test_npx_package_install_captures_all_package_flags(tmp_path: Path) -> None:
+    """Verify npx launch specs with supplemental packages preserve all installs."""
+    config = """
+[mcp_servers.desktop-commander]
+command = "npx"
+args = [
+  "-y",
+  "-p",
+  "@wonderwhy-er/desktop-commander@latest",
+  "-p",
+  "ajv",
+  "desktop-commander",
+]
+"""
+    (tmp_path / "config.toml").write_text(config)
+
+    manifest = collect_manifest(tmp_path)
+
+    record = manifest.dependencies[0]
+    assert record.package == "@wonderwhy-er/desktop-commander@latest"
+    assert record.install_command == [
+        "npm",
+        "install",
+        "-g",
+        "@wonderwhy-er/desktop-commander@latest",
+        "ajv",
+    ]
+
+
+def test_collect_manifest_adds_crawl4ai_local_setup_recipe(tmp_path: Path) -> None:
+    """Verify the local Crawl4AI MCP server can be bootstrapped from the manifest."""
+    python_path = tmp_path / "crawl4ai" / "bin" / "python"
+    server_path = tmp_path / "bin" / "crawl4ai-mcp-server.py"
+    config = f"""
+[mcp_servers.crawl4ai]
+command = "{python_path}"
+args = ["{server_path}"]
+"""
+    (tmp_path / "config.toml").write_text(config)
+
+    manifest = collect_manifest(tmp_path)
+
+    record = manifest.dependencies[0]
+    playwright = tmp_path / "crawl4ai" / "bin" / "playwright"
+    assert record.package == "crawl4ai"
+    assert record.install_commands == [
+        ["uv", "venv", str(tmp_path / "crawl4ai"), "--python", "3.13"],
+        ["uv", "pip", "install", "--python", str(python_path), "crawl4ai"],
+        [str(playwright), "install", "chromium"],
+        [str(playwright), "install-deps", "chromium"],
+    ]
+
+
 def test_install_dependencies_dry_run_returns_supported_commands(tmp_path: Path) -> None:
     """Verify install planning is explicit and does not execute by default."""
     (tmp_path / "config.toml").write_text(
