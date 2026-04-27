@@ -26,11 +26,13 @@ from codex_cli_sync.git_ops import (
     git,
     has_commits,
     has_remote,
+    ignored_tracked_files,
     is_ancestor,
     is_repo,
     remote_ref_exists,
     staged_changes,
     status_porcelain,
+    untrack_files,
 )
 from codex_cli_sync.lockfile import acquire_lock
 from codex_cli_sync.logging_setup import log_event
@@ -142,6 +144,9 @@ def push(
         branch = config.branch
         config.apply(codex_dir)
         refresh_manifest(codex_dir)
+        ignored_files = ignored_tracked_files(codex_dir)
+        if ignored_files:
+            untrack_files(codex_dir, ignored_files)
         fetch = git(codex_dir, "fetch", "--prune", "origin", check=False, timeout=20)
         if fetch.returncode != 0:
             return PushOutcome("no_remote", (fetch.stderr or fetch.stdout).strip())

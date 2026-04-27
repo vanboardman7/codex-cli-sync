@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from codex_cli_sync.errors import GitError
@@ -86,6 +87,27 @@ def staged_changes(cwd: Path) -> bool:
 def status_porcelain(cwd: Path) -> str:
     """Return porcelain status output for local changes."""
     return git(cwd, "status", "--porcelain=v1").stdout
+
+
+def ignored_tracked_files(cwd: Path) -> list[str]:
+    """Return tracked files that now match repository ignore rules."""
+    result = git(cwd, "ls-files", "-ci", "--exclude-standard", "-z")
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def untrack_files(cwd: Path, paths: Iterable[str]) -> None:
+    """Remove paths from Git tracking while leaving working-tree files in place."""
+    files = list(paths)
+    for start in range(0, len(files), 100):
+        git(
+            cwd,
+            "rm",
+            "--cached",
+            "--ignore-unmatch",
+            "--",
+            *files[start : start + 100],
+            timeout=30,
+        )
 
 
 def current_branch(cwd: Path, default: str) -> str:

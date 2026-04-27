@@ -10,13 +10,31 @@ from codex_cli_sync.config import Config
 from codex_cli_sync.errors import ConfigError
 
 
-def test_defaults_exclude_auth_and_transient_files() -> None:
-    """Verify defaults exclude auth and transient sync files."""
+def test_defaults_exclude_auth_transient_and_local_runtime_files() -> None:
+    """Verify defaults keep machine-local runtime artifacts out of sync."""
     config = Config()
     gitignore = config.render_gitignore()
-    assert "auth.json" in gitignore
-    assert ".sync.lock" in gitignore
-    assert ".sync.log" in gitignore
+
+    required_patterns = """
+    auth.json
+    .sync.lock
+    .sync.log
+    log/
+    logs_*.sqlite*
+    state_*.sqlite*
+    context-mode/content/
+    shell_snapshots/
+    tmp/
+    *.sqlite-wal
+    *.sqlite-shm
+    *.db-wal
+    *.db-shm
+    """.split()
+    for pattern in required_patterns:
+        assert pattern in gitignore
+
+    assert "sessions/" not in gitignore
+    assert "history.jsonl" not in gitignore
     assert config.render_gitattributes() == ""
 
 
@@ -47,7 +65,9 @@ ref = ""
     config = Config.load(tmp_path)
     assert config.auto_pull_on_start is False
     assert config.branch == "trunk"
-    assert config.excludes == ["one"]
+    assert "one" in config.excludes
+    assert "logs_*.sqlite*" in config.excludes
+    assert "sessions/" not in config.excludes
     assert config.includes == ["two"]
     assert not config.lfs_patterns
     assert config.hooks_source == ""

@@ -20,12 +20,31 @@ DEFAULT_EXCLUDES = [
     ".sync-state.json",
     "auth.json",
     "auth.json.*",
+    "log/",
+    "logs_*.sqlite*",
+    "state_*.sqlite*",
+    "context-mode/content/",
+    "shell_snapshots/",
+    "tmp/",
+    "*.sqlite-wal",
+    "*.sqlite-shm",
+    "*.db-wal",
+    "*.db-shm",
     "*.tmp",
     "*.swp",
     ".DS_Store",
 ]
 
 DEFAULT_LFS_PATTERNS: list[str] = []
+
+
+def _merged_excludes(configured: list[str]) -> list[str]:
+    """Return required local-only excludes plus user configured patterns."""
+    merged: list[str] = []
+    for pattern in [*DEFAULT_EXCLUDES, *configured]:
+        if pattern not in merged:
+            merged.append(pattern)
+    return merged
 
 
 @dataclass
@@ -66,7 +85,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
             auto_pull_on_start=_bool(sync, "auto_pull_on_start", True),
             auto_push_on_stop=_bool(sync, "auto_push_on_stop", True),
             branch=_str(sync, "branch", "main"),
-            excludes=_str_list(paths, "exclude", DEFAULT_EXCLUDES),
+            excludes=_merged_excludes(_str_list(paths, "exclude", [])),
             includes=_str_list(paths, "include", []),
             lfs_patterns=_str_list(lfs, "patterns", DEFAULT_LFS_PATTERNS),
             hooks_source=_str(hooks, "source", DEFAULT_HOOK_SOURCE),
