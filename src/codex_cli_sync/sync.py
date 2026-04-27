@@ -12,6 +12,13 @@ from pathlib import Path
 from typing import Literal
 
 from codex_cli_sync.config import Config, DEFAULT_CODEX_DIR
+from codex_cli_sync.dependencies import (
+    collect_manifest,
+    dependency_change_summary,
+    diff_manifests,
+    refresh_manifest,
+    write_dependency_state,
+)
 from codex_cli_sync.errors import GitError
 from codex_cli_sync.git_ops import (
     ahead_behind,
@@ -78,6 +85,7 @@ def pull(
             return PullOutcome("no_remote", (fetch.stderr or fetch.stdout).strip())
         if not remote_ref_exists(codex_dir, branch):
             return PullOutcome("clean")
+        before_dependencies = collect_manifest(codex_dir)
         stash_ref = _stash_if_dirty(codex_dir)
         try:
             if has_commits(codex_dir):
@@ -107,9 +115,13 @@ def pull(
                     "conflict", "local changes conflicted while restoring stash"
                 )
             config.apply(codex_dir)
+            after_dependencies = refresh_manifest(codex_dir)
+            dependency_changes = diff_manifests(before_dependencies, after_dependencies)
+            write_dependency_state(codex_dir, dependency_changes)
+            dependency_detail = dependency_change_summary(dependency_changes)
             outcome_status = "pulled" if merge.stdout.strip() else "clean"
             log_event(codex_dir, "pull", status=outcome_status)
-            return PullOutcome(outcome_status)
+            return PullOutcome(outcome_status, dependency_detail)
         finally:
             if stash_ref and _stash_exists(codex_dir, stash_ref):
                 _restore_stash(codex_dir, stash_ref)
@@ -129,6 +141,7 @@ def push(
             return PushOutcome("no_remote")
         branch = config.branch
         config.apply(codex_dir)
+        refresh_manifest(codex_dir)
         fetch = git(codex_dir, "fetch", "--prune", "origin", check=False, timeout=20)
         if fetch.returncode != 0:
             return PushOutcome("no_remote", (fetch.stderr or fetch.stdout).strip())

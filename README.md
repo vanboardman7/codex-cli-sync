@@ -46,6 +46,10 @@ Use `uvx --from`, not `uvx --with`, when running from the Git repository. `--wit
 | `codex-sync hooks install` | Merge managed hooks into `~/.codex/hooks.json` |
 | `codex-sync hooks uninstall` | Remove only managed hook entries |
 | `codex-sync hooks status` | Inspect managed hook status |
+| `codex-sync deps refresh` | Regenerate the tracked external dependency manifest |
+| `codex-sync deps status` | Check external dependency availability on this machine |
+| `codex-sync deps install` | Print supported install commands without running them |
+| `codex-sync deps install --execute` | Run supported install commands explicitly |
 
 ## Configuration
 
@@ -58,7 +62,16 @@ auto_push_on_stop = true
 branch = "main"
 
 [paths]
-exclude = [".sync.lock", ".sync.log", "auth.json", "*.tmp", "*.swp"]
+exclude = [
+  ".sync.lock",
+  ".sync.log",
+  ".sync-state.json",
+  "auth.json",
+  "auth.json.*",
+  "*.tmp",
+  "*.swp",
+  ".DS_Store",
+]
 include = []
 
 [lfs]
@@ -72,6 +85,14 @@ ref = "main"
 `auth.json` is excluded by default. Syncing credentials across machines is risky; log in separately on each machine.
 
 Codex currently loads lifecycle hooks from the global `~/.codex/hooks.json`, not from plugin-local hook files, so `hooks install` edits that file and enables `[features].codex_hooks = true` in `config.toml`.
+
+## Dependency Tracking
+
+`codex-sync push` refreshes `.sync-dependencies.json` from Codex config files before committing. The scanner tracks MCP server commands in `config.toml`, chained commands in `hooks.json`, plugin metadata references, package-manager runners such as `uvx` and `npx`, and exact local paths such as `.venv/bin/server`.
+
+`codex-sync pull` compares dependencies before and after a successful remote update. If startup pulls add, remove, or change external dependencies, the hook prints a concise alert and writes details to local `.sync-state.json`.
+
+Install commands are never run from startup hooks. Use `codex-sync deps status` to see what is missing on the current machine, then `codex-sync deps install --execute` to run supported installs. Local `.venv` or absolute-path binaries are checked by exact path and reported when missing, but they are not installed automatically.
 
 ## Release Sync
 

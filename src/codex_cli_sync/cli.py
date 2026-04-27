@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 from pathlib import Path
 
 from codex_cli_sync import __version__
 from codex_cli_sync.config import Config, DEFAULT_CODEX_DIR
+from codex_cli_sync.dependencies import (
+    check_dependencies,
+    collect_manifest,
+    install_dependencies,
+    refresh_manifest,
+)
 from codex_cli_sync.errors import CodexSyncError, ConfigError
 from codex_cli_sync.hook_runner import pull_from_hook, push_from_hook
 from codex_cli_sync.hooks import install_hooks, status as hook_status, uninstall_hooks
@@ -65,6 +72,16 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub = config_parser.add_subparsers(dest="config_command", required=True)
     config_sub.add_parser("show").set_defaults(func=_cmd_config_show)
     config_sub.add_parser("apply").set_defaults(func=_cmd_config_apply)
+
+    deps_parser = sub.add_parser("deps", help="track external dependencies")
+    deps_sub = deps_parser.add_subparsers(dest="deps_command", required=True)
+    deps_sub.add_parser("refresh").set_defaults(func=_cmd_deps_refresh)
+    deps_sub.add_parser("status").set_defaults(func=_cmd_deps_status)
+    deps_install = deps_sub.add_parser("install")
+    deps_install.add_argument(
+        "--execute", action="store_true", help="run supported install commands"
+    )
+    deps_install.set_defaults(func=_cmd_deps_install)
 
     hooks_parser = sub.add_parser("hooks", help="manage Codex lifecycle hooks")
     hooks_sub = hooks_parser.add_subparsers(dest="hooks_command", required=True)
@@ -168,6 +185,49 @@ def _cmd_config_apply(args: argparse.Namespace) -> int:
     Config.load(args.codex_dir).apply(args.codex_dir)
     print("applied")
     return 0
+
+
+def _cmd_deps_refresh(args: argparse.Namespace) -> int:
+    """Write the tracked external dependency manifest."""
+    manifest = refresh_manifest(args.codex_dir)
+    count = len(manifest.dependencies)
+    suffix = "y" if count == 1 else "ies"
+    print(f"tracked {count} external dependenc{suffix}")
+    return 0
+
+
+def _cmd_deps_status(args: argparse.Namespace) -> int:
+    """Print dependency availability for the current machine."""
+    manifest = collect_manifest(args.codex_dir)
+    statuses = check_dependencies(manifest, args.codex_dir)
+    if not statuses:
+        print("no external dependencies tracked")
+        return 0
+    missing = False
+    for item in statuses:
+        state = "ok" if item.available else "missing"
+        missing = missing or not item.available
+        record = item.record
+        print(f"{state}: {record.kind} {record.name}: {item.detail}")
+    return 1 if missing else 0
+
+
+def _cmd_deps_install(args: argparse.Namespace) -> int:
+    """Plan or run supported dependency install commands."""
+    manifest = collect_manifest(args.codex_dir)
+    results = install_dependencies(manifest, args.codex_dir, execute=args.execute)
+    if not results:
+        print("no installable external dependencies")
+        return 0
+    if not args.execute:
+        print("dry-run: pass --execute to run these commands")
+    failed = False
+    for result in results:
+        failed = failed or result.status == "error"
+        print(f"{result.status}: {shlex.join(result.command)}")
+        if result.detail:
+            print(result.detail)
+    return 1 if failed else 0
 
 
 def _cmd_hooks_install(args: argparse.Namespace) -> int:

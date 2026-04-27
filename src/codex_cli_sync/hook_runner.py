@@ -37,6 +37,8 @@ def _run_hook(action: str, codex_dir: Path) -> int:
             if action == "pull"
             else push(codex_dir, config=config)
         )
+        if action == "pull" and outcome.detail.startswith("external dependencies changed"):
+            print(f"codex-sync: {outcome.detail}", file=sys.stderr)
         log_event(
             codex_dir, f"hook_{action}", status=outcome.status, detail=outcome.detail
         )
