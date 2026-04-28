@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import socket
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +39,9 @@ from codex_cli_sync.lockfile import acquire_lock
 from codex_cli_sync.logging_setup import log_event
 
 PullStatus = Literal["pulled", "clean", "disabled", "not_repo", "no_remote", "conflict"]
-PushStatus = Literal["pushed", "clean", "disabled", "not_repo", "no_remote", "conflict"]
+PushStatus = Literal[
+    "pushed", "clean", "disabled", "not_repo", "no_remote", "conflict", "invalid"
+]
 
 
 @dataclass(frozen=True)
@@ -142,17 +145,21 @@ def push(
         if not has_remote(codex_dir):
             return PushOutcome("no_remote")
         branch = config.branch
-        config.apply(codex_dir)
-        refresh_manifest(codex_dir)
-        ignored_files = ignored_tracked_files(codex_dir)
-        if ignored_files:
-            untrack_files(codex_dir, ignored_files)
         fetch = git(codex_dir, "fetch", "--prune", "origin", check=False, timeout=20)
         if fetch.returncode != 0:
             return PushOutcome("no_remote", (fetch.stderr or fetch.stdout).strip())
         rebase_outcome = _rebase_before_commit(codex_dir, branch)
         if rebase_outcome:
             return rebase_outcome
+        invalid_detail = _validate_config_toml(codex_dir)
+        if invalid_detail:
+            log_event(codex_dir, "push", status="invalid", detail=invalid_detail)
+            return PushOutcome("invalid", invalid_detail)
+        config.apply(codex_dir)
+        refresh_manifest(codex_dir)
+        ignored_files = ignored_tracked_files(codex_dir)
+        if ignored_files:
+            untrack_files(codex_dir, ignored_files)
         git(codex_dir, "add", "-A", timeout=20)
         committed = False
         if staged_changes(codex_dir):
@@ -177,6 +184,25 @@ def push(
         )
         log_event(codex_dir, "push", status=outcome_status)
         return PushOutcome(outcome_status)
+
+
+def _validate_config_toml(codex_dir: Path) -> str:
+    """Return a push-blocking config.toml validation message, if any."""
+    path = codex_dir / "config.toml"
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"config.toml: cannot read: {exc}"
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if line.startswith(("<<<<<<<", "=======", ">>>>>>>")):
+            return f"config.toml:{line_number}: conflict marker blocks sync"
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        return f"config.toml: invalid TOML: {exc}"
+    return ""
 
 
 def status(

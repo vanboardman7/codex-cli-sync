@@ -150,7 +150,7 @@ def _cmd_push(args: argparse.Namespace) -> int:
     print(
         outcome.status if not outcome.detail else f"{outcome.status}: {outcome.detail}"
     )
-    return 0 if outcome.status not in {"conflict"} else 1
+    return 0 if outcome.status not in {"conflict", "invalid"} else 1
 
 
 def _cmd_status(args: argparse.Namespace) -> int:

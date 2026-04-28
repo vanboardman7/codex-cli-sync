@@ -76,6 +76,40 @@ def test_push_omits_local_runtime_files_but_syncs_sessions(sync_repos) -> None:
     )
     assert not (sync_repos.second / "logs_2.sqlite").exists()
 
+
+
+def test_push_refuses_config_toml_with_conflict_markers(sync_repos) -> None:
+    """Verify push refuses to sync unresolved config.toml conflicts."""
+    config = Config(hooks_source="", hooks_ref="")
+    (sync_repos.first / "config.toml").write_text(
+        "[projects.foo]\n<<<<<<< Updated upstream\n=======\n>>>>>>> Stashed changes\n"
+    )
+
+    outcome = push(sync_repos.first, config=config)
+
+    assert outcome.status == "invalid"
+    assert "config.toml" in outcome.detail
+    assert "conflict marker" in outcome.detail
+    ahead = git(sync_repos.first, "rev-list", "--count", "origin/main..HEAD")
+    assert ahead.stdout.strip() == "0"
+    assert _remote_config(sync_repos.second) == "[features]\n"
+
+
+def test_push_refuses_invalid_config_toml(sync_repos) -> None:
+    """Verify push refuses to sync unparsable config.toml."""
+    config = Config(hooks_source="", hooks_ref="")
+    (sync_repos.first / "config.toml").write_text("[projects\n")
+
+    outcome = push(sync_repos.first, config=config)
+
+    assert outcome.status == "invalid"
+    assert "config.toml" in outcome.detail
+    assert "invalid TOML" in outcome.detail
+    ahead = git(sync_repos.first, "rev-list", "--count", "origin/main..HEAD")
+    assert ahead.stdout.strip() == "0"
+    assert _remote_config(sync_repos.second) == "[features]\n"
+
+
 def test_push_conflict_does_not_create_auto_commit(sync_repos) -> None:
     """Verify remote conflicts do not leave a local auto-sync commit behind."""
     config = Config(hooks_source="", hooks_ref="")
@@ -94,3 +128,9 @@ def test_push_conflict_does_not_create_auto_commit(sync_repos) -> None:
         check=False,
     )
     assert ahead.stdout.strip() == "0"
+
+
+def _remote_config(repo) -> str:
+    """Return config.toml from the current remote main branch."""
+    git(repo, "fetch", "origin", "main")
+    return git(repo, "show", "origin/main:config.toml").stdout
